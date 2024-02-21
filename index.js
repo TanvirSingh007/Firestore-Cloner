@@ -21,6 +21,9 @@ const destinationFirestore = destinationApp.firestore();
 async function copyData() {
     try {
         // await copyCollection('roles', 'roles');
+
+        await copyCollectionWithPagination('roles', 'roles');
+
         // await copyCollection('extra', 'extra');
         // await copyCollection('creators', 'creators');
         // await copyCollection('admins', 'admins');
@@ -60,5 +63,62 @@ async function copyCollection(sourcePath, destinationPath) {
         await destinationCollectionRef.doc(documentId).set(data);
     }
 }
+
+async function copyCollectionWithPagination(sourcePath, destinationPath) {
+    const sourceCollectionRef = sourceFirestore.collection(sourcePath);
+    const destinationCollectionRef = destinationFirestore.collection(destinationPath);
+
+    let lastDoc = null;
+
+    do {
+        const sourceSnapshot = await sourceCollectionRef.limit(500).startAfter(lastDoc).get(); // Adjust the limit as per your needs
+
+        const batch = destinationFirestore.batch();
+
+        sourceSnapshot.docs.forEach(docSnapshot => {
+            const documentId = docSnapshot.id;
+            const data = docSnapshot.data();
+
+            // Copy the current document
+            const newDocumentRef = destinationCollectionRef.doc(documentId);
+            batch.set(newDocumentRef, data);
+
+            // Check for nested collections inside the document
+            // Note: This assumes that nested collections are only one level deep
+            const nestedCollectionsPromises = [];
+            const nestedCollections = docSnapshot.ref.listCollections();
+            nestedCollectionsPromises.push(nestedCollections);
+
+            Promise.all(nestedCollectionsPromises)
+                .then(nestedCollectionRefsArray => {
+                    nestedCollectionRefsArray.forEach(nestedCollectionRefs => {
+                        nestedCollectionRefs.forEach(nestedCollectionRef => {
+                            // Get documents from nested collection
+                            nestedCollectionRef.get()
+                                .then(nestedCollectionSnapshot => {
+                                    nestedCollectionSnapshot.forEach(nestedDocSnapshot => {
+                                        const nestedDocData = nestedDocSnapshot.data();
+                                        const newNestedDocumentRef = newDocumentRef.collection(nestedCollectionRef.id).doc(nestedDocSnapshot.id);
+                                        batch.set(newNestedDocumentRef, nestedDocData);
+                                    });
+                                })
+                                .catch(error => {
+                                    console.error("Error getting nested collection documents: ", error);
+                                });
+                        });
+                    });
+                })
+                .catch(error => {
+                    console.error("Error getting nested collections: ", error);
+                });
+        });
+
+        // Commit the batch
+        await batch.commit();
+
+        lastDoc = sourceSnapshot.docs[sourceSnapshot.docs.length - 1];
+    } while (sourceSnapshot.docs.length > 0);
+}
+
 // Run the data copy process
 copyData();
