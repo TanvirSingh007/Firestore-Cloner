@@ -69,9 +69,12 @@ async function copyCollectionWithPagination(sourcePath, destinationPath) {
     const destinationCollectionRef = destinationFirestore.collection(destinationPath);
 
     let lastDoc = null;
+    let sourceSnapshot;
 
-    do {
-        const sourceSnapshot = await sourceCollectionRef.orderBy(firebase.firestore.FieldPath.documentId()).limit(500).startAfter(lastDoc).get();// Adjust the limit as per your needs
+    while (true) {
+        sourceSnapshot = lastDoc
+            ? await sourceCollectionRef.orderBy(admin.firestore.FieldPath.documentId()).startAfter(lastDoc).limit(500).get()
+            : await sourceCollectionRef.orderBy(admin.firestore.FieldPath.documentId()).limit(500).get();
 
         const batch = destinationFirestore.batch();
 
@@ -116,9 +119,12 @@ async function copyCollectionWithPagination(sourcePath, destinationPath) {
         // Commit the batch
         await batch.commit();
 
+        if (sourceSnapshot.docs.length === 0) break;
+
         lastDoc = sourceSnapshot.docs[sourceSnapshot.docs.length - 1];
-    } while (sourceSnapshot.docs.length > 0);
+    }
 }
+
 
 // Run the data copy process
 copyData();
